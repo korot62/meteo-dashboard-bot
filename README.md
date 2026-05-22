@@ -1,8 +1,8 @@
 # 🌦 Meteo Dashboard
-
+screenshots/dashboard-main.png
 Modern IoT weather dashboard powered by FastAPI, Chart.js and ESP/Wemos sensors.
 
-![dashboard](https://raw.githubusercontent.com/korot62/meteo-dashboard-bot/main/screenshots/dashboard.png)
+![dashboard](https://raw.githubusercontent.com/korot62/meteo-dashboard-bot/main/screenshots/dashboard-main.png)
 
 ---
 
