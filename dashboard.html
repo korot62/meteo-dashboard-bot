@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Meteo Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+    background: #111;
+    color: #fff;
+    font-family: Arial;
+    text-align: center;
+    transition: background 1s ease;
+}
+
+canvas {
+    max-width: 90%;
+    margin: 20px auto;
+}
+
+.card {
+    background: #222;
+    padding: 20px;
+    margin: 20px;
+    border-radius: 15px;
+}
+
+.big {
+    font-size: 22px;
+    margin-bottom: 10px;
+}
+
+.air-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 8px;
+}
+
+.status {
+    font-size: 18px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🌡 Meteo Dashboard</h1>
+
+<canvas id="tempChart"></canvas>
+<canvas id="pressChart"></canvas>
+<canvas id="kpChart"></canvas>
+<canvas id="windChart"></canvas>
+<canvas id="wemosChart"></canvas>
+
+<div class="card">
+    <div class="big">🌌 Состояние неба</div>
+    <div id="auroraStatus" class="status">...</div>
+</div>
+
+<div class="card">
+    <div class="big">📍 Сейчас</div>
+    <div id="currentData">...</div>
+</div>
+
+<div class="card">
+    <div class="big">📡 WiFi Sensor</div>
+    <div id="wemosData">...</div>
+</div>
+
+<div class="card">
+    <div class="big">🌫 Air Quality (MQ135)</div>
+    <div id="airData">...</div>
+</div>
+
+<script>
+
+let charts = {};
+
+async function loadData() {
+    try {
+        const res = await fetch("/full");
+        const data = await res.json();
+
+        const sensors = data.sensors || [];
+        const kpArr = data.kp || [];
+        const wemos = data.wemos || [];
+        const mq135 = data.mq135 || [];
+
+        if (sensors.length === 0) return;
+
+        const times = sensors.map(x => x.time?.slice(11,16) || "--:--");
+        const kpTimes = kpArr.map(x => x.time?.slice(11,16) || "--:--");
+
+        const temps = sensors.map(x => x.temp);
+        const press = sensors.map(x => x.press);
+
+        const windRaw = sensors.map(x => x.wind ?? 0);
+        const windData = smooth(windRaw);
+
+        const windLabels = sensors.map(x => {
+            const t = x.time?.slice(11,16);
+            const arrow = windArrowSymbol(x.deg ?? 0);
+            return `${t} ${arrow}`;
+        });
+
+        const kpNow = kpArr.length ? kpArr[kpArr.length - 1].kp : null;
+        const last = sensors[sensors.length - 1];
+
+        const wind = last.wind ?? 0;
+        const deg = last.deg ?? 0;
+        const hum = last.humidity ?? last.hum ?? 0;
+
+        const wemosTimes = wemos.map(x => x.time?.slice(11,16) || "--:--");
+        const wemosTemps = wemos.map(x => x.temp);
+
+        const lastWemos = wemos.length ? wemos[wemos.length - 1] : null;
+
+
+        drawChart("tempChart", times, temps, "Temperature");
+        drawChart("pressChart", times, press, "Pressure");
+        drawKP("kpChart", kpTimes, kpArr.map(x => x.kp));
+        drawWindChart("windChart", windLabels, windData);
+
+        if (wemos.length > 0) {
+            drawChart("wemosChart", wemosTimes, wemosTemps, "WiFi Sensor Temp");
+        }
+
+        document.getElementById("currentData").innerHTML = `
+            🌡 ${last.temp.toFixed(1)} °C<br>
+            💧 ${hum.toFixed(1)} %<br>
+            📈 ${last.press.toFixed(1)} hPa<br>
+            💨 ${wind.toFixed(1)} m/s (${deg})<br>
+            🧲 Kp: ${kpNow}
+        `;
+
+        if (lastWemos) {
+            document.getElementById("wemosData").innerHTML = `
+                🌡 ${lastWemos.temp.toFixed(1)} °C<br>
+                💧 ${lastWemos.humidity.toFixed(1)} %<br>
+                📶 ${lastWemos.rssi} dBm<br>
+                🕒 ${lastWemos.time}
+            `;
+        }
+
+
+        const lastMQ = mq135.at(-1);
+
+        if (lastMQ) {
+               const color = airColor(lastMQ.ppm);
+
+               document.getElementById("airData").innerHTML = `
+                        <span class="air-dot" style="background:${color}"></span>
+                        🌫 ${lastMQ.ppm} ppm<br>
+                        📶 RSSI: ${lastMQ.rssi} dBm<br>
+                        🕒 ${lastMQ.time}
+                 `;
+        } else {
+            document.getElementById("airData").innerHTML = "нет данных";
+        }
+
+
+
+    } catch (e) {
+        console.error("DATA ERROR", e);
+    }
+}
+
+function drawChart(id, labels, data, label) {
+    if (charts[id]) charts[id].destroy();
+
+    charts[id] = new Chart(document.getElementById(id), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{ label, data }]
+        }
+    });
+}
+
+function drawKP(id, labels, data) {
+    if (charts[id]) charts[id].destroy();
+
+    charts[id] = new Chart(document.getElementById(id), {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: "Kp Index",
+                data,
+                backgroundColor: data.map(v =>
+                    v < 4 ? "green" :
+                    v < 6 ? "yellow" :
+                    "red"
+                )
+            }]
+        },
+        options: {
+            scales: { y: { min: 0, max: 9 } }
+        }
+    });
+}
+
+function drawWindChart(id, labels, data) {
+    if (charts[id]) charts[id].destroy();
+
+    charts[id] = new Chart(document.getElementById(id), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: "Wind (m/s)",
+                data,
+                tension: 0.4,
+                fill: true
+            }]
+        }
+    });
+}
+
+async function loadAurora() {
+    try {
+        const res = await fetch("/aurora");
+        const data = await res.json();
+
+        document.getElementById("auroraStatus").innerText =
+            `${data.status} | ☁️ ${data.clouds}% | Kp ${data.kp}`;
+
+    } catch (e) {
+        console.error("AURORA ERROR", e);
+    }
+}
+
+function smooth(data, k = 3) {
+    return data.map((_, i) => {
+        const start = Math.max(0, i - k);
+        const arr = data.slice(start, i + 1);
+        return arr.reduce((a,b)=>a+b,0) / arr.length;
+    });
+}
+
+function windArrowSymbol(deg) {
+    const arrows = ["↑","↗","→","↘","↓","↙","←","↖"];
+    return arrows[Math.round(deg / 45) % 8];
+}
+
+function airColor(ppm) {
+    if (ppm <= 400) return "#4caf50";   // green
+    if (ppm <= 800) return "#ffeb3b";   // yellow
+    if (ppm <= 1500) return "#ff9800";  // orange
+    return "#f44336";                   // red
+}
+
+loadData();
+setInterval(loadData, 60000);
+
+loadAurora();
+setInterval(loadAurora, 60000);
+
+</script>
+
+</body>
+</html>

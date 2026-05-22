@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.db
+*.sqlite
+.env
+
+.pio/
+.vscode/
+
+firmware/**/.pio/
+firmware/**/.vscode/
